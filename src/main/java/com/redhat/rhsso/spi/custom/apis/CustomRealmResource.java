@@ -13,8 +13,9 @@ import javax.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.spi.HttpRequest;
 import org.keycloak.authorization.util.Tokens;
+import org.keycloak.common.ClientConnection;
+import org.keycloak.events.EventBuilder;
 import org.keycloak.events.admin.OperationType;
-import org.keycloak.events.admin.ResourceType;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.jose.jws.JWSInputException;
 import org.keycloak.models.KeycloakSession;
@@ -47,21 +48,32 @@ public class CustomRealmResource extends AdminRoot implements RealmResourceProvi
     @Context 
     private HttpHeaders headers;
 
+    @Context
+    protected ClientConnection clientConnection;
+
     private KeycloakSession session;
 
     protected TokenManager tokenManager;
 
     private AdminPermissionEvaluator auth;
 
-    private AdminEventBuilder adminEvent;
+    private AdminEventBuilder adminEvent; // admin events
 
-    public CustomRealmResource(KeycloakSession session) {
+    private EventBuilder event; // logins event
+
+    private RealmModel realm;
+
+    public CustomRealmResource(KeycloakSession session, RealmModel realm, EventBuilder event) {
         this.session = session;
         this.tokenManager = new TokenManager();
+        this.event = event;
+        this.realm = realm;
+    }
+
+    private void configureAdminAuth() {
         AdminAuth auth = authenticateRealmAdminRequest(this.headers);
-        RealmModel realm =  session.getContext().getRealm();
         this.auth = AdminPermissions.evaluator(session, realm, auth);
-        this.adminEvent = adminEvent.resource(ResourceType.USER);
+        this.adminEvent = new AdminEventBuilder(realm, auth, session, clientConnection);
     }
 
     @Override
@@ -102,7 +114,7 @@ public class CustomRealmResource extends AdminRoot implements RealmResourceProvi
     }
 
     @POST
-    @Path("any-user/username-exists")
+    @Path("/any-user/username-exists")
     @Produces(MediaType.TEXT_PLAIN + "; charset=utf-8")
     public Response authenticatedApi(@FormParam("username") String username) {
 
@@ -129,10 +141,11 @@ public class CustomRealmResource extends AdminRoot implements RealmResourceProvi
     }
 
     @POST
-    @Path("only-realm-admin/username-exists")
+    @Path("/only-realm-admin/username-exists")
     @Produces(MediaType.TEXT_PLAIN + "; charset=utf-8")
     public Response onlyRealmAdmin(@FormParam("username") String username) {
 
+        this.configureAdminAuth();
         // check if user has manage rights
         try {
             auth.users().requireManage();
